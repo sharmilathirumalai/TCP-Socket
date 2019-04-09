@@ -13,7 +13,7 @@ public class northwind {
 
 	private void connect() throws Exception {
 		Class.forName("com.mysql.cj.jdbc.Driver");
-		String URL = "jdbc:mysql://localhost:3306";
+		String URL = "jdbc:mysql://db.cs.dal.ca:3306?useUnicode=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=UTC";
 
 		//Gets and sets username and password from properties file
 		Properties id = new Properties();        

@@ -15,7 +15,11 @@ public class Server
 	{ 
 		try
 		{ 
-			server = new ServerSocket(5000); 
+			Scanner userInput = new Scanner( System.in );
+			System.out.print("Port to connect to on the client? ");
+			Integer port = Integer.valueOf(userInput.nextLine());
+			server = new ServerSocket(port); 
+			userInput.close();
 			System.out.println("Server started"); 
 			
 			// waits for client
