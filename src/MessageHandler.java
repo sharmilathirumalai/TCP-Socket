@@ -18,15 +18,33 @@ public class MessageHandler {
 
 	private ArrayList<String> body = new ArrayList<String>();
 	private northwind db = new northwind();
+	private final Map<Integer, String> codeMap = new HashMap<Integer, String>();
 
 	private final ArrayList<String> supportedProtocols =  new ArrayList<String>(Arrays.asList("Order3901/1.0"));
+	private final ArrayList<String> supportedOprns =  new ArrayList<String>(Arrays.asList("AUTH", "NEW", "DROP", "ADD", "ORDER", "LOGOUT", "LIST"));
+
 	private final int successStart = 200;
 	private final int successEnd = 299;
 
+
 	public MessageHandler(PrintWriter out) {
 		this.out = out;
+		codeMap.put(200, "OK");
+		codeMap.put(401, "Unauthorized");
+		codeMap.put(402, "Bad State");
+		codeMap.put(404, "Bad Client");
+		codeMap.put(406, "Bad Product");
+		codeMap.put(408, "Bad Order");
+		codeMap.put(407, "Discontinued product");
+		codeMap.put(500, "Internal Error");
 	}
 
+	 /*
+     * @param message - request message
+     * @param scan - socket incoming buffer connection
+     * 
+     * This method reads the message from socket in desired format
+     */
 	public void incomingMessage(String message, Scanner scan)  {
 		requestHeaders = new HashMap<String, String>();
 		body = new ArrayList<String>();
@@ -43,9 +61,10 @@ public class MessageHandler {
 			protocol = firstLine[2];
 			oprn = firstLine[0];
 			target = firstLine [1];
-
-			if(!supportedProtocols.contains(protocol)) {
-				WriteOutgoingMessage(500, "");
+			
+			// Checks for supported protocol, operation and target
+			if(!supportedProtocols.contains(protocol) || !supportedOprns.contains(oprn) || target == null) {
+				WriteOutgoingMessage(404, "");
 				return;
 			}
 
@@ -68,10 +87,12 @@ public class MessageHandler {
 				}
 			}
 
-
+			// Block any message without authentication
 			if(!oprn.equalsIgnoreCase("AUTH") && userDO == null) {
 				WriteOutgoingMessage(401, "");
 			} else {
+				
+				// Performs the requested operation
 				performOperation();
 			}
 
@@ -81,7 +102,8 @@ public class MessageHandler {
 			WriteOutgoingMessage(500, "");
 		}
 	}
-
+	
+	// Pull the body content from buffer
 	private boolean processBody(Scanner scan) throws Exception {
 
 		int j = 0;
@@ -92,7 +114,8 @@ public class MessageHandler {
 				j = j + line.length();
 			}
 		}
-
+		
+		// Error when content mismatches with length
 		if(j != (contentLength - 2)) {
 			WriteOutgoingMessage(404, "");
 			return false;
@@ -100,7 +123,8 @@ public class MessageHandler {
 
 		return true;
 	}
-
+	
+	// Main method which performs the specified operation
 	private void performOperation() throws Exception  {
 		int statusCode = 404;
 		String responsebody = "";
@@ -108,9 +132,11 @@ public class MessageHandler {
 		if(oprn.equalsIgnoreCase("AUTH")) {
 
 			if(userDO != null && userDO.isAUthenticatedUser()) {
-				throw new Exception ("Already logged-in");
+				statusCode = 200;
 			} else {
 				userDO = new Client(target, java.sql.Date.valueOf(requestHeaders.get("Password")));
+				
+				// Checks for valid user to authenticate
 				if(db.authenticate(userDO)) {
 					statusCode = 200;
 				} else {
@@ -120,9 +146,11 @@ public class MessageHandler {
 
 		} else if(oprn.equalsIgnoreCase("NEW")) {
 
-			if(!requestHeaders.get("Cookie").contentEquals(userDO.getCookie())) {
+			if(!requestHeaders.get("Cookie").equals(userDO.getCookie())) {
 				statusCode = 401;
 			} else {
+				
+				// Check whether the order is New
 				if(order != null) {
 					statusCode = 402;
 				} else {
@@ -132,8 +160,12 @@ public class MessageHandler {
 					String region = requestHeaders.get("Region");
 					String postal = requestHeaders.get("PostalCode");
 					String country = requestHeaders.get("Country");
+					
+					// Checks for complete address
 					if(requestHeaders.size() == 1 || requestHeaders.size() == 6) {
 						statusCode = 200;
+						
+						// Initializes the order
 						order = new Order(target, address, city, region, postal, country);
 					}
 				}
@@ -141,24 +173,36 @@ public class MessageHandler {
 
 		} else if(oprn.equalsIgnoreCase("ADD")) {
 
-			if(!requestHeaders.get("Cookie").contentEquals(userDO.getCookie())) {
+			if(!requestHeaders.get("Cookie").equals(userDO.getCookie())) {
 				statusCode = 401;
 			} else {
-
+				
+				// Check whether an order exist
 				if(order == null) {
 					statusCode = 402;
 				} else {
-					int PID = Integer.valueOf(target);
-					int quantity = Integer.valueOf(body.get(0));
-					int pdtstatus = db.checkProduct(PID, quantity);
-					if(pdtstatus == 1) {
-						statusCode = 200;
-						order.addProduct(PID, quantity);
-					} else if(pdtstatus == 2) {
-						statusCode = 406;
-					} else if(pdtstatus == 3) {
-						statusCode = 407;
+					try
+					{
+						int PID = Integer.valueOf(target);
+						int quantity = Integer.valueOf(body.get(0));
+						
+						// Check whether the product is valid
+						int pdtstatus = db.checkProduct(PID, quantity);
+						
+						if(pdtstatus == 1) {
+							statusCode = 200;
+							order.addProduct(PID, quantity);
+						} else if(pdtstatus == 2) {
+							statusCode = 406;
+						} else if(pdtstatus == 3) {
+							statusCode = 407;
+						}
+					} catch (NumberFormatException ex)
+					{
+						statusCode = 404;
 					}
+
+
 				}
 
 			}
@@ -168,6 +212,8 @@ public class MessageHandler {
 			if(!requestHeaders.get("Cookie").equals(userDO.getCookie())) {
 				statusCode = 401;
 			} else {
+				
+				// Sends list request to db
 				if(body.size() != 0) {
 					responsebody = db.listElements(target, body.get(0), order);
 				} else {
@@ -181,10 +227,22 @@ public class MessageHandler {
 			if(!requestHeaders.get("Cookie").equals(userDO.getCookie())) {
 				statusCode = 401;
 			} else {
-				int orderID = db.placeOrder(order, userDO);
-				statusCode = 200;
-				order = null;
-				responsebody = String.valueOf(orderID);
+				
+				// Checks whether the order has products in it
+				if(order.products.size() == 0) {
+					statusCode = 408;
+				} else {
+					
+					// Places the order
+					int orderID = db.placeOrder(order, userDO);
+					if(orderID == 0 ) {
+						statusCode = 404;
+					} else {
+						statusCode = 200;
+						order = null;
+						responsebody = String.valueOf(orderID);
+					}
+				}
 			}
 
 		} else if(oprn.equalsIgnoreCase("DROP")) {
@@ -195,6 +253,8 @@ public class MessageHandler {
 				if(order == null) {
 					statusCode = 402;
 				} else {
+					
+					// Clears the order object
 					order = null;
 					statusCode = 200;
 				}
@@ -212,22 +272,16 @@ public class MessageHandler {
 		WriteOutgoingMessage(statusCode, responsebody);
 	}
 
-
+    /*
+     * @param statuscode - response code
+     * @param responsebody - response content
+     * 
+     * This method writes the message in socket in desired format
+     */
 	private void WriteOutgoingMessage(int statusCode, String responsebody) {
 		String message = protocol + " " + statusCode;
-		String statusmsg = "eee";
+		String statusmsg = codeMap.getOrDefault(statusCode, "OK");
 
-		if(statusCode >= successStart && statusCode  <= successEnd) {
-			statusmsg = "OK";
-		} else if(statusCode == 500) {
-			statusmsg = "Internal Error";
-		} else if(statusCode == 402) {
-			statusmsg = "Wrong state";
-		} else if(statusCode == 404) {
-			statusmsg = "Bad Client";
-		} else if(statusCode == 401) {
-			statusmsg = "Unauthorized";
-		}
 
 		message = message + " " + statusmsg + "\r\n";
 
@@ -251,6 +305,7 @@ public class MessageHandler {
 	}
 
 	private void shutdownConnection() {
+		// Clears the order and user object
 		userDO = null;
 		order = null;
 	}

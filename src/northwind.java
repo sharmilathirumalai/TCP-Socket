@@ -31,12 +31,16 @@ public class northwind {
 		MyIdentity.setIdentity( id );
 
 		s.executeQuery("USE "+ id.getProperty("database"));
+
+		// Query for checking the user credentials
 		String query = "SELECT * FROM employees where LastName = '"+ userDO.uname +"' and BirthDate = '"+ userDO.DOB +"';";
 		ResultSet result = s.executeQuery(query);  
 
 		if(result.next()) {
+			// If true start session
 			userDO.EmployeeID = result.getInt("EmployeeID");
 			userDO.startSession();
+			con.close();
 			return true;
 		}
 
@@ -48,21 +52,25 @@ public class northwind {
 		System.out.println("Place order....");
 		System.out.println(order.cusID);
 		System.out.println(userDO.uname);
-		
+
 		connect();
 		Statement s= con.createStatement();  
 		Properties id = new Properties();        
 		MyIdentity.setIdentity( id );
 
 		s.executeQuery("USE "+ id.getProperty("database"));
+
+		// Get the last placed orderID and computes next orderID.
 		ResultSet result = s.executeQuery("SELECT max(OrderID) FROM orders;"); 
 		int nextOrderID;
-		
+
 		if(result.next()) {
-			 nextOrderID = result.getInt(1) + 1;
+			nextOrderID = result.getInt(1) + 1;
 		} else {
 			nextOrderID = 1;
 		}
+		
+		// Inserts the order details into order table
 		String orderQuery = "INSERT INTO orders (OrderID, CustomerID, EmployeeID, ShipAddress, ShipCity, ShipRegion, ShipPostalCode, ShipCountry, OrderDate, RequiredDate) VALUES(?,?,?,?,?,?,?,?,?,?)";
 		PreparedStatement POStmt=con.prepareStatement(orderQuery);  
 
@@ -70,6 +78,7 @@ public class northwind {
 		POStmt.setString(2, order.cusID);
 		POStmt.setInt(3, userDO.EmployeeID);
 
+		// Uses the custom address
 		if(order.IsAddressPresent()) {
 			POStmt.setString(4, order.address);
 			POStmt.setString(5, order.city);
@@ -78,15 +87,19 @@ public class northwind {
 			POStmt.setString(8, order.country);
 
 		} else {
+			// Gets the  address from table
 			result = s.executeQuery("SELECT * FROM customers where CustomerID='"+ order.cusID+ "';");
-			result.next();
-			POStmt.setString(4, result.getString("Address"));
-			POStmt.setString(5, result.getString("City"));
-			POStmt.setString(6, result.getString("Region"));
-			POStmt.setString(7, result.getString("PostalCode"));
-			POStmt.setString(8, result.getString("Country"));
+			if(result.next()) {
+				POStmt.setString(4, result.getString("Address"));
+				POStmt.setString(5, result.getString("City"));
+				POStmt.setString(6, result.getString("Region"));
+				POStmt.setString(7, result.getString("PostalCode"));
+				POStmt.setString(8, result.getString("Country"));
+			} else {
+				return 0;
+			}
 		}
-		
+
 		LocalDate orderDate = LocalDate.now();
 		LocalDate requiredDate = LocalDate.now().plusDays(7);
 
@@ -96,7 +109,8 @@ public class northwind {
 		if(POStmt.executeUpdate() != 1) {
 			return 0;
 		} 
-
+		
+		// Inserts the product details into order table
 		String orderDetailsQuery = "INSERT INTO orderdetails (OrderID, ProductID, Quantity, UnitPrice) VALUES(?,?,?,?)";
 		PreparedStatement SODetailsStmt = con.prepareStatement(orderDetailsQuery);  
 		SODetailsStmt.setInt(1, nextOrderID);
@@ -108,7 +122,7 @@ public class northwind {
 			result = s.executeQuery("SELECT UnitPrice FROM products where ProductID="+ pair.getKey()+ ";");
 			result.next();
 			SODetailsStmt.setFloat(4, result.getFloat("UnitPrice"));
-			
+
 			if(SODetailsStmt.executeUpdate() != 1) {
 				return 0;
 			} 
@@ -116,7 +130,8 @@ public class northwind {
 
 		return nextOrderID;
 	}
-
+	
+	// Gets the list of customers, products, and products count in the order
 	public String listElements(String target, String ID, Order order) throws Exception {
 		System.out.println("Listing "+ target +"....");
 		connect();
@@ -129,7 +144,7 @@ public class northwind {
 		String IDColumn = "ProductID";
 		String NameColumn = "ProductName";
 		String row = "";
-		
+
 		if(target.equals("product")) {
 			result = s.executeQuery("SELECT \r\n" + 
 					"   *\r\n" + 
@@ -151,19 +166,19 @@ public class northwind {
 			}
 
 		} else if(target.equals("order")) {
-			
+
 			row = IDColumn + "	Quantity" + "\r\n";
 			for (Map.Entry<Integer, Integer> pair : order.products.entrySet()) {
 				row = row + pair.getKey() + "	" + pair.getValue() + "\r\n";
 			}
 		}
 
-		
+
 		con.close();
 		return row;
 	}
 
-
+	// Checks whether entered product is valid
 	public int checkProduct(int PID, int Quantity) throws Exception {
 		connect();
 		Statement s= con.createStatement();  
@@ -177,11 +192,13 @@ public class northwind {
 				"   products\r\n" + 
 				"WHERE\r\n" + 
 				"    ProductID = " + PID);  
-
+		
+		// Checks whether product exist in the table
 		if(!result.next()) {
 			return 2;
 		}
-
+		
+		// Checks for discontinued products
 		if(result.getInt("Discontinued") == 1) {
 			return 3;
 		}
